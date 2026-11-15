@@ -114,6 +114,13 @@ li.done .txt{text-decoration:line-through; color:var(--muted)}
 .pill{height:44px; padding:0 18px; border-radius:999px; border:1px solid var(--line); background:var(--paper); font-weight:700; white-space:nowrap}
 .pill.strong{background:var(--ink); color:var(--paper); border-color:var(--ink)}
 .pill:disabled{opacity:.5}
+.pill.ic{display:inline-flex; align-items:center; gap:6px; padding:0 14px}
+.pill.ic svg{width:18px; height:18px; flex:none}
+@media (max-width:640px){
+  .actions{flex-wrap:wrap; justify-content:center; gap:6px}
+  .pill.ic{width:44px; padding:0; justify-content:center}
+  .pill.ic .lbl{display:none}
+}
 .seg{display:inline-flex; border:1px solid var(--line); border-radius:999px; padding:3px; background:var(--bg)}
 .seg button{border:0; background:none; height:38px; padding:0 16px; border-radius:999px; font-weight:700; color:var(--muted)}
 .seg button[aria-pressed="true"]{background:var(--paper); color:var(--ink); box-shadow:0 0 0 1px var(--line)}
@@ -265,6 +272,9 @@ body.has-mic .day{padding-bottom:104px}
           <button type="button" data-view="week">週</button><button type="button" data-view="month">月</button>
         </div>
         <button type="button" class="pill strong" id="addBtn">＋ 追加</button>
+        <button type="button" class="pill ic" id="installBtn" data-install hidden aria-label="インストール" title="この端末にアプリとしてインストール">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span class="lbl">インストール</span>
+        </button>
         <button type="button" class="icon-btn" data-open-settings aria-label="設定">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></svg>
         </button>
@@ -887,6 +897,9 @@ function openSettings() {
     <h3>画面の色</h3>
     <div class="seg" id="themeSeg"><button type="button" data-theme-v="auto">端末に合わせる</button><button type="button" data-theme-v="light">明るい</button><button type="button" data-theme-v="dark">暗い</button></div>
 
+    <h3>アプリとして使う</h3>
+    <div id="installBox">${installHtml()}</div>
+
     <h3>Google カレンダーとの接続</h3>
     <label>Apps Script のウェブアプリ URL<input id="apiUrl" type="url" value="${esc(D.apiUrl)}" placeholder="https://script.google.com/macros/s/…/exec"></label>
     <label>合言葉<input id="apiToken" type="password" value="${esc(D.token)}" autocomplete="off"></label>
@@ -1222,6 +1235,7 @@ $('#calBody').addEventListener('keydown', ev => {
 document.addEventListener('click', ev => {
   if (ev.target.closest('[data-close]')) closeSheet();
   else if (ev.target.closest('[data-open-settings]')) openSettings();
+  else if (ev.target.closest('[data-install]')) promptInstall();
 });
 $('#sheetWrap').addEventListener('click', ev => { if (ev.target.id === 'sheetWrap') closeSheet(); });
 document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && !$('#sheetWrap').hidden) closeSheet(); });
@@ -1232,6 +1246,45 @@ document.addEventListener('visibilitychange', () => {
 });
 wideMq.addEventListener('change', layout);
 midMq.addEventListener('change', layout);
+
+/* ========== アプリとしてインストール ========== */
+// Chrome / Edge は条件（1回以上の操作と30秒ほどの表示）を満たすと beforeinstallprompt を送ってくる。
+// それを取っておき、画面のボタンからインストール画面を出す。
+let installEv = null;
+const isStandalone = () => ['standalone', 'window-controls-overlay', 'fullscreen', 'minimal-ui']
+  .some(m => matchMedia(`(display-mode: ${m})`).matches) || navigator.standalone === true;
+function installHtml() {
+  if (isStandalone()) return '<p class="hint">いまはアプリとして開いています。</p>';
+  if (installEv) return '<button type="button" class="pill strong" data-install>この端末にインストール</button>';
+  const ua = navigator.userAgent;
+  if (/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1))
+    return '<p class="hint">Safari の共有ボタン →「ホーム画面に追加」で、アプリのように使えます。</p>';
+  if (/Safari/.test(ua) && !/Chrome|Chromium|Edg|Firefox/.test(ua))
+    return '<p class="hint">Safari のメニュー「ファイル」→「Dock に追加」で、アプリのように使えます。</p>';
+  return '<p class="hint">Chrome か Edge で開くと、ここと画面上部に「インストール」ボタンが出ます。開いてすぐは出ず、少し操作していると出てきます。この端末にすでに入っている場合は出ません。</p>';
+}
+function renderInstall() {
+  $('#installBtn').hidden = !installEv || isStandalone();
+  const box = $('#installBox');
+  if (box) box.innerHTML = installHtml();
+}
+async function promptInstall() {
+  if (!installEv) return;
+  const ev = installEv;
+  installEv = null; // 1回の通知で出せるインストール画面は1回だけ
+  renderInstall();
+  try { await ev.prompt(); await ev.userChoice; } catch {}
+}
+window.addEventListener('beforeinstallprompt', ev => {
+  ev.preventDefault();
+  installEv = ev;
+  renderInstall();
+});
+window.addEventListener('appinstalled', () => {
+  installEv = null;
+  renderInstall();
+  toast('インストールしました。次からは「家族カレンダー」のアイコンから開けます');
+});
 
 /* ========== 定期更新 ========== */
 function tick() {
@@ -1254,6 +1307,8 @@ loadEvents();
 loadLists();
 loadWeather();
 applyWakeLock();
+// オフライン時の予備と、古い Chrome / Edge でもインストールできるようにするため
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
 </script>
 </body>
